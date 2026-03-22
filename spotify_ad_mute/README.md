@@ -1,27 +1,16 @@
 # Spotify Mute
 
-`spotify-mute` is a tiny macOS-only AppleScript watcher that uses the Spotify desktop app as the source of truth.
+`spotify-mute` is a small macOS AppleScript watcher for the Spotify desktop app. It polls Spotify once per second, mutes your Mac when the current item looks like an ad or matches your blacklist, and restores audio when playback returns to something allowed.
 
-It is designed for personal use, but the repo is structured so other people can clone it, edit `blacklist.tsv`, and run it without needing Spotify OAuth, API tokens, or app registration.
+It does not use the Spotify API, OAuth, tokens, or app registration. Everything runs locally through AppleScript.
 
 ## What it does
 
-- reads the current track title, artist, album, and player state from Spotify via AppleScript
-- also reads the track `id` and `spotify url` so it can spot likely ad content
-- checks those values against a blacklist file
-- auto-mutes likely Spotify ads based on ad-like metadata
-- mutes system output via AppleScript when the current track matches
-- restores audio when playback moves to a non-matching track, but only if this script was the thing that muted audio
-
-## Project layout
-
-- `spotify_muter.applescript`: main watcher loop
-- `blacklist.tsv`: sample blacklist entries
-- `inspect_spotify_track.applescript`: prints the currently playing Spotify metadata
-- `start_spotify_muter.sh`: wrapper used by `launchd`
-- `install_launch_agent.sh`: installs the startup agent for the current clone path
-- `uninstall_launch_agent.sh`: removes the startup agent
-- `launchd/local.spotify-mute.plist.template`: generic LaunchAgent template
+- reads the current track title, artist, album, player state, `id`, and `spotify url`
+- auto-mutes likely Spotify ads based on metadata heuristics
+- supports a simple TSV blacklist for tracks, podcast intros, or albums you want muted
+- restores audio only if this script was the thing that muted it
+- can run in the foreground or as a per-user `launchd` agent at login
 
 ## Requirements
 
@@ -29,44 +18,17 @@ It is designed for personal use, but the repo is structured so other people can 
 - Spotify desktop app
 - permission for `osascript` to control Spotify when macOS prompts
 
-## Blacklist format
+## Project layout
 
-Use tab-separated columns:
+- `spotify_muter.applescript`: main watcher loop
+- `blacklist.tsv`: sample blacklist entries
+- `inspect_spotify_track.applescript`: prints the currently playing Spotify metadata
+- `start_spotify_muter.sh`: wrapper script used by `launchd`
+- `install_launch_agent.sh`: installs the LaunchAgent for the current clone path
+- `uninstall_launch_agent.sh`: unloads and removes the LaunchAgent
+- `launchd/local.spotify-mute.plist.template`: LaunchAgent template used during install
 
-```text
-title<TAB>artist<TAB>album
-```
-
-Rules:
-
-- title, artist, and album are all optional, but at least one field must be filled
-- blank artist/album fields are treated as wildcards
-- matching is case-insensitive
-- matching uses substring containment, so `Intro` matches `Daily Intro Mix`
-
-## Ad detection
-
-The watcher also auto-mutes likely ads without needing a blacklist entry.
-
-It treats a track as an ad when one of these metadata checks matches:
-
-- track `id` contains `spotify:ad`
-- track `spotify url` contains `spotify:ad`
-- track title, artist, or album contains `Advertisement`
-- artist is `Spotify` and title/album contains `upgrade` or `premium`
-
-These are heuristics based on the metadata exposed by the Spotify desktop app, not a documented AppleScript `is ad` flag.
-
-Examples:
-
-```text
-Bad Song
-Podcast Intro	Some Creator
-Live Version	Artist Name	Tour Album
-Better Now	Post Malone
-```
-
-## Run it
+## Quick start
 
 From this folder:
 
@@ -82,39 +44,72 @@ osascript spotify_muter.applescript /absolute/path/to/blacklist.tsv
 
 Stop it with `Ctrl+C`.
 
-## Test it
+## Blacklist format
 
-The sample blacklist already includes:
+Use tab-separated columns:
 
 ```text
-Better Now	Post Malone
+title<TAB>artist<TAB>album
 ```
 
-So a quick manual test is:
+Rules:
 
-1. Start the watcher with `osascript spotify_muter.applescript`
-2. Play `Better Now` in Spotify
-3. Confirm your Mac mutes within about one second
-4. Skip to another track and confirm audio returns
+- title, artist, and album are all optional, but at least one field must be filled
+- blank fields behave as wildcards
+- matching is case-insensitive
+- matching uses substring containment, so `Intro` matches `Daily Intro Mix`
+- lines starting with `#` are treated as comments
 
-To inspect the current Spotify metadata while something is playing:
+Current sample entries in `blacklist.tsv`:
+
+```text
+Bad Song
+Podcast Intro	Some Creator
+Live Version	Artist Name	Tour Album
+```
+
+## Ad detection
+
+The watcher also auto-mutes likely ads without needing a blacklist entry.
+
+It treats a track as ad-like when one of these checks matches:
+
+- track `id` contains `spotify:ad`
+- track `spotify url` contains `spotify:ad`
+- track title, artist, or album contains `Advertisement`
+- artist is `Spotify` and title or album contains `upgrade` or `premium`
+
+These are heuristics based on metadata exposed by the Spotify desktop app, not a documented AppleScript `is ad` flag.
+
+## Inspect current metadata
+
+To inspect the exact Spotify metadata for the currently playing item:
 
 ```bash
 osascript inspect_spotify_track.applescript
 ```
 
-That helper prints the current `name`, `artist`, `album`, `id`, and `spotify url`, which is useful for confirming blacklist entries and for seeing what ad metadata Spotify exposes on your machine.
+That helper prints `player_state`, `name`, `artist`, `album`, `id`, and `spotify_url`. It is useful for creating blacklist entries and checking how Spotify labels ad content on your machine.
+
+## Manual testing
+
+A quick manual test with the sample blacklist:
+
+1. Start the watcher with `osascript spotify_muter.applescript`.
+2. In Spotify, play something whose metadata matches one of the sample rows, or temporarily add your own known track to `blacklist.tsv`.
+3. Confirm your Mac mutes within about one second.
+4. Skip to a non-matching track and confirm audio returns.
 
 ## Start at login
 
-The macOS-native way to keep this running at startup is a per-user `launchd` agent.
-
-Install it for the current clone with:
+To run this automatically after you log into macOS:
 
 ```bash
 chmod +x start_spotify_muter.sh install_launch_agent.sh uninstall_launch_agent.sh
 ./install_launch_agent.sh
 ```
+
+The installer generates `~/Library/LaunchAgents/local.spotify-mute.plist`, points it at the current repo path, enables it, and starts it immediately.
 
 Useful commands:
 
@@ -127,9 +122,10 @@ tail -f ~/Library/Logs/spotify-mute.log
 Notes:
 
 - this starts when you log into macOS, not before login
+- the agent is configured with `KeepAlive`, so `launchd` restarts it if it exits
+- if you move this repo, rerun `./install_launch_agent.sh` so the generated plist uses the new path
 - the first automated run may still trigger macOS permission prompts for controlling Spotify
-- if you move this repo, rerun `./install_launch_agent.sh` so the generated plist points at the new path
 
 ## macOS permissions
 
-The first run may prompt you to allow `osascript` to control Spotify. Approve that so Apple Events can read the track metadata.
+On first use, macOS may ask you to allow `osascript` to control Spotify. Approve that prompt so the watcher can read track metadata and respond to playback changes.
