@@ -1,0 +1,7 @@
+# title<TAB>artist<TAB>album
+# Leave artist or album blank to make them wildcards.
+# Matching is case-insensitive and uses "contains" for each populated field.
+
+Bad Song
+Podcast Intro	Some Creator
+Live Version	Artist Name	Tour Album
